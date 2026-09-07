@@ -9,15 +9,16 @@ const readline = require('readline');
 // ======= KONFIGURASI PENTING =======
 // GANTI NOMOR HP BOT DI BAWAH INI DENGAN NOMOR WA YANG INGIN DIJADIKAN BOT!
 // Gunakan format: 628... (tanpa tanda +, tanpa spasi)
-const NOMOR_HP_BOT = '6285137619957'; // <-- GANTI INI!
+const NOMOR_HP_BOT = '6285137619957'; // <-- GANTI INI DENGAN NOMOR ANDA!
 
 const TARGET_GROUP_ID = '120363429342229342@g.us'; 
 const TIMEZONE = 'Asia/Jakarta';
-const SPREADSHEET_ID = 'MASUKKAN_ID_SPREADSHEET_ANDA_DISINI'; 
+const SPREADSHEET_ID = '11oqVmxfVwySlBiNI6jD8NfSkdBniTwSzI-2Bgg9wNKY'; 
 // ===================================
 
 let dailyVotes = {};
 let absenActive = false;
+let isRequestingCode = false; // Penanda agar tidak request kode dobel dengan cepat
 
 const question = (text) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -34,19 +35,30 @@ async function connectToWhatsApp() {
         browser: ['Windows', 'Chrome', '1.0.0'] // Menyamar sebagai browser PC biasa
     });
 
-    if (!sock.authState.creds.registered) {
-        console.log('Menunggu 5 detik sebelum meminta kode tautan...');
-        await new Promise(resolve => setTimeout(resolve, 5000));
+    if (!sock.authState.creds.registered && !isRequestingCode) {
+        isRequestingCode = true; // Kunci segera agar tidak ada request lain yang masuk
+        console.log('Menunggu 10 detik agar server stabil sebelum meminta kode...');
         
-        try {
-            const code = await sock.requestPairingCode(NOMOR_HP_BOT);
-            console.log('\n==================================================');
-            console.log('🎉 KODE TAUTAN ANDA:', code);
-            console.log('^ MASUKKAN KODE DI ATAS KE MENU "TAUTKAN PERANGKAT" DI WA HP ANDA ^');
-            console.log('==================================================\n');
-        } catch (error) {
-            console.error('Gagal meminta kode tautan. Mengulangi...', error.message);
-        }
+        setTimeout(async () => {
+            try {
+                const code = await sock.requestPairingCode(NOMOR_HP_BOT);
+                console.log('\n==================================================');
+                console.log('🎉 KODE TAUTAN ANDA:', code);
+                console.log('^ MASUKKAN KODE DI ATAS KE MENU "TAUTKAN PERANGKAT" DI WA HP ANDA ^');
+                console.log('==================================================\n');
+                
+                // Jeda SUPER LAMA (60 detik) setelah memberikan kode
+                // Ini mencegah looping cepat jika koneksi terputus tiba-tiba
+                console.log('Menunggu 60 detik agar Anda santai memasukkan kode di HP...');
+                setTimeout(() => {
+                     isRequestingCode = false; // Buka kunci setelah 1 menit berlalu
+                }, 60000);
+
+            } catch (error) {
+                console.error('Gagal meminta kode tautan:', error.message);
+                isRequestingCode = false;
+            }
+        }, 10000); // Penundaan awal 10 detik
     }
 
     sock.ev.on('connection.update', (update) => {
@@ -56,7 +68,8 @@ async function connectToWhatsApp() {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log('Koneksi terputus. Mencoba menghubungkan ulang...', shouldReconnect);
             if (shouldReconnect) {
-                setTimeout(connectToWhatsApp, 3000); // Jeda sebelum reconnect
+                // Jeda 15 detik sebelum mencoba koneksi ulang agar tidak terlalu agresif
+                setTimeout(connectToWhatsApp, 15000); 
             }
         } else if (connection === 'open') {
             console.log('✅ Bot WhatsApp berhasil terhubung dan siap digunakan!');
@@ -66,7 +79,6 @@ async function connectToWhatsApp() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // ... (kode pesan dan absen tetap sama) ...
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
@@ -90,7 +102,6 @@ async function connectToWhatsApp() {
     });
 }
 
-// ... (kode Google Sheets tetap sama) ...
 async function saveToGoogleSheets(data) {
     try {
         if (!fs.existsSync('./credentials.json')) return;
