@@ -1,43 +1,62 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const qrcode = require('qrcode-terminal');
 const cron = require('node-cron');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const fs = require('fs');
+const readline = require('readline');
+
+// ======= KONFIGURASI PENTING =======
+// GANTI NOMOR HP BOT DI BAWAH INI DENGAN NOMOR WA YANG INGIN DIJADIKAN BOT!
+// Gunakan format: 628... (tanpa tanda +, tanpa spasi)
+const NOMOR_HP_BOT = '6285137619957'; // <-- GANTI INI!
 
 const TARGET_GROUP_ID = '120363429342229342@g.us'; 
 const TIMEZONE = 'Asia/Jakarta';
 const SPREADSHEET_ID = 'MASUKKAN_ID_SPREADSHEET_ANDA_DISINI'; 
+// ===================================
 
 let dailyVotes = {};
 let absenActive = false;
+
+const question = (text) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    return new Promise((resolve) => { rl.question(text, resolve) });
+};
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
 
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: false, // Dimatikan agar kita bisa cetak QR kustom yang lebih rapi
+        printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
-        browser: ['Bot Tahajud', 'Chrome', '1.0.0']
+        browser: ['Windows', 'Chrome', '1.0.0'] // Menyamar sebagai browser PC biasa
     });
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
+    if (!sock.authState.creds.registered) {
+        console.log('Menunggu 5 detik sebelum meminta kode tautan...');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        try {
+            const code = await sock.requestPairingCode(NOMOR_HP_BOT);
             console.log('\n==================================================');
-            qrcode.generate(qr, { small: true });
-            console.log('^ SILAKAN SCAN QR CODE DI ATAS MENGGUNAKAN HP ANDA ^');
+            console.log('🎉 KODE TAUTAN ANDA:', code);
+            console.log('^ MASUKKAN KODE DI ATAS KE MENU "TAUTKAN PERANGKAT" DI WA HP ANDA ^');
             console.log('==================================================\n');
+        } catch (error) {
+            console.error('Gagal meminta kode tautan. Mengulangi...', error.message);
         }
+    }
+
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
 
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log('Koneksi terputus. Mencoba menghubungkan ulang...', shouldReconnect);
             if (shouldReconnect) {
-                connectToWhatsApp();
+                setTimeout(connectToWhatsApp, 3000); // Jeda sebelum reconnect
             }
         } else if (connection === 'open') {
             console.log('✅ Bot WhatsApp berhasil terhubung dan siap digunakan!');
@@ -47,6 +66,7 @@ async function connectToWhatsApp() {
 
     sock.ev.on('creds.update', saveCreds);
 
+    // ... (kode pesan dan absen tetap sama) ...
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
@@ -70,6 +90,7 @@ async function connectToWhatsApp() {
     });
 }
 
+// ... (kode Google Sheets tetap sama) ...
 async function saveToGoogleSheets(data) {
     try {
         if (!fs.existsSync('./credentials.json')) return;
